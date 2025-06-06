@@ -11,7 +11,7 @@ st.title("📧 Gen AI - Email Assistant")
 st.markdown("Generate professional emails based on your input topic, tone, and language.")
 
 # Initialize Groq client
-api_key = "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"  # Replace with your Groq API key
+api_key = "enter api here"  # Replace with your Groq API key
 client = Groq(api_key=api_key)
 
 # Mapping UI language names to codes for translation
