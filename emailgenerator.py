@@ -1,184 +1,211 @@
+# to run this code install any local llm model in you system
 import streamlit as st
-from groq import Groq
-from deep_translator import GoogleTranslator
-import time
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+from langchain_community.llms import Ollama
+import base64
 
-# App title and description
-st.title("📧 Gen AI - Email Assistant")
-st.markdown("Generate professional emails based on your input topic, tone, and language.")
+# ────────── Page Setup ──────────
+st.set_page_config(layout="wide")
 
-# Initialize Groq client
-api_key = "enter api here"  # Replace with your Groq API key
-client = Groq(api_key=api_key)
+# ─────── Logo and Title (Centered, Single Block) ───────
+with open("logo.png", "rb") as image_file:
+    encoded_logo = base64.b64encode(image_file.read()).decode()
 
-# Mapping UI language names to codes for translation
-language_map = {
-    "english": "english",
-    "hindi": "hindi",
-    "spanish": "spanish",
-    "french": "french",
-    "german": "german",
-    "chinese (simplified)": "zh-CN",
-    "japanese": "japanese",
-    "italian": "italian",
-    "portuguese": "portuguese"
-}
+st.markdown(f"""
+    <div style="display: flex; justify-content: center; align-items: center; gap: 20px; margin-top: 20px; margin-bottom: 30px;">
+        <img src="data:image/png;base64,{encoded_logo}" width="100">
+        <h1 style="margin: 0; font-size: 2.5rem;">Gen AI – Email Assistant</h1>
+    </div>
+""", unsafe_allow_html=True)
 
-# Input form
-with st.form("email_form"):
-    topic = st.text_input("✏️ Enter the topic or content of the email", max_chars=200)
-    tone = st.selectbox(
-        "🎭 Choose the tone of the email",
-        [
-            "formal",
-            "casual",
-            "persuasive",
-            "apologetic",
-            "friendly",
-            "enthusiastic",
-            "professional",
-            "humorous",
-            "sympathetic",
-            "rude"
-        ]
-    )
-    language = st.selectbox(
-        "🌐 Language of the email",
-        [
-            "english",
-            "hindi",
-            "spanish",
-            "french",
-            "german",
-            "chinese (simplified)",
-            "japanese",
-            "italian",
-            "portuguese"
-        ]
-    )
-    word_limit = st.slider("🧮 Desired word limit for email", min_value=50, max_value=300, value=120, step=10)
-    recipient_name = st.text_input("👤 Recipient name (e.g., HR Manager) — optional")
-    recipient_email = st.text_input("📧 Recipient's email address (for optional sending)")
-    sender_name = st.text_input("🧑 Your name — optional")
-    sender_email = st.text_input("📤 Your email address (for sending, optional)")
-    sender_password = st.text_input("🔒 Your email password or app password (for sending, optional)", type="password")
-    keywords_input = st.text_input("🔑 Keywords to emphasize (comma-separated)", "")
-    send_email = st.checkbox("📨 Send the generated email to the recipient? (Optional)")
-    submit = st.form_submit_button("✉️ Generate Email")
+# ────────── Styling Padding ──────────
+st.markdown("""
+    <style>
+        .block-container { padding-left: 3rem !important; padding-right: 3rem !important; }
+    </style>
+""", unsafe_allow_html=True)
 
-# On form submission
-if submit:
-    if not topic:
-        st.error("Please enter the email topic or content.")
-    elif send_email and (not recipient_email or not sender_email or not sender_password):
-        st.error("To send email, please fill recipient email, your email, and your email password.")
-    else:
-        keywords = [kw.strip() for kw in keywords_input.split(",") if kw.strip()]
-        keyword_text = ", ".join(keywords) if keywords else "none"
+# ────────── Sidebar for Navigation ──────────
+page = st.sidebar.radio("Navigation", ["Generate Email Reply", "Sample Emails"])
 
-        # Get language code for translation
-        source_lang = language_map.get(language.lower(), "english")
+# ────────── Sample Emails View ──────────
+if page == "Sample Emails":
+    st.subheader("Sample Email Collection")
+    try:
+        with open("sampleemail.pdf", "rb") as f:
+            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+            pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800px" type="application/pdf"></iframe>'
+            st.markdown(pdf_display, unsafe_allow_html=True)
+    except FileNotFoundError:
+        st.error("'sampleemail.pdf' not found in the current directory.")
+    st.stop()
 
-        # Translate topic to English if needed
-        if source_lang != "english":
-            try:
-                topic_en = GoogleTranslator(source=source_lang, target="english").translate(topic)
-            except Exception as e:
-                st.error(f"Translation error: {e}")
-                topic_en = topic  # fallback to original
-        else:
-            topic_en = topic
+# ────────── Ollama Init ──────────
+try:
+    llm = Ollama(model="gemma2:2b")
+except Exception as e:
+    st.error(f"Ollama init failed: {e}")
+    st.stop()
 
-        # Construct prompt dynamically based on optional names
-        greeting_part = f"addressed to {recipient_name}" if recipient_name else ""
-        sender_part = f"from {sender_name}" if sender_name else ""
+# ────────── Layout ──────────
+left, right = st.columns(2)
 
-        prompt = (
-            f"Write a detailed, {tone} email in {language} "
-            f"{greeting_part} {sender_part}. "
-            f"The topic is: '{topic_en}'. Include these keywords: {keyword_text}. "
-            f"Keep the length around {word_limit} words. "
-            f"Use a professional structure: greeting, body, closing. Respond only in {language}. "
+with left:
+    st.markdown("### Reply to Email")
+
+    with st.form("email_form"):
+        tone = st.selectbox("Select your reply tone", ["positive", "neutral", "negative"])
+        word_limit = st.slider("Word limit", 50, 300, 120, step=10)
+        keywords_raw = st.text_input("Keywords (comma separated)", placeholder="e.g. meeting, form, update")
+
+        original_email = st.text_area(
+            "Paste your email content below:",
+            height=250,
+            placeholder="Paste any email here to generate a reply..."
         )
 
-        # If sender_name is provided, instruct to replace placeholder, else skip that
-        if sender_name:
-            prompt += "Ensure [Your Name] is replaced with the actual sender's name."
+        submitted = st.form_submit_button("Generate Reply")
 
-        # Generate email
-        with st.spinner("Generating your email..."):
-            stream = client.chat.completions.create(
-                model="llama3-8b-8192",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_completion_tokens=1000,
-                top_p=1,
-                stream=True
-            )
+# ────────── Helpers ──────────
+def format_keywords(raw: str) -> str:
+    return ", ".join([k.strip() for k in raw.split(",") if k.strip()]) or "none"
+tone_instruction = {
+    "positive": (
+        "Respond in a warm, cooperative, and proactive tone. "
+        "Start by acknowledging the sender's message with gratitude or positivity. "
+        "Express agreement, acceptance, or willingness to help. "
+        "Confirm actions clearly and offer assistance if needed. "
+        "Be encouraging and solution-oriented — great for scheduling, approvals, confirmations, form submissions, etc. "
+        "Example language includes:\n"
+        "- 'I’d be happy to assist with this.'\n"
+        "- 'Thank you for your message – I’ll take care of it promptly.'\n"
+        "- 'This sounds like a great initiative – count me in.'\n"
+        "- 'I’ve noted the request and will ensure timely completion.'\n"
+        "- 'Sure, I will provide the requested details by [date].'\n"
+        "- 'Appreciate your effort on this – happy to collaborate.'\n"
+        "- 'Thank you for the update – glad to see the progress.'\n"
+        "- 'Happy to confirm my attendance for the meeting.'\n"
+        "- 'Yes, I’ll submit the form by the stated deadline.'\n"
+        "- 'Glad to support this, please let me know the next steps.'\n"
+        "- 'I'll share the required documents by EOD.'\n"
+        "- 'Thanks again – let me know if you need anything else.'\n"
+        "- 'Thank you for your service — we wish you all the best in your next role.'\n"
+        "- 'We appreciate your contribution and will ensure a smooth transition.'\n"
+        "- 'I’m grateful for your dedication and wish you continued success.'\n"
+        "- 'It has been a pleasure working with you — best wishes for your journey ahead.'\n"
+        "- 'Thanks for your outstanding work — we look forward to staying in touch.'\n"
+        "- 'Absolutely, I’ll prioritize this and update you shortly.'\n"
+        "- 'You’ve made a lasting impact here — we’re proud of your work.'\n"
+        "- 'Thanks for the timely update — I’m on it now.'\n"
+        "- 'Yes, I’ll coordinate with the team and ensure completion.'\n"
+        "- 'Looking forward to working together on this new project.'\n"
+        "- 'Great to see this moving forward — I’ll be sure to support wherever needed.'"
+    ),
 
-            response = ""
-            for chunk in stream:
-                delta = chunk.choices[0].delta.content or ""
-                response += delta
-                time.sleep(0.02)
+    "neutral": (
+        "Respond in a courteous, balanced, and professional tone. "
+        "Acknowledge the message without confirming or denying the request. "
+        "Best suited for pending decisions, escalations, or information-only replies. "
+        "Avoid strong opinions; maintain a measured stance. "
+        "Example language includes:\n"
+        "- 'Thank you for reaching out — I’ll review this and respond shortly.'\n"
+        "- 'I’ve noted your request; it’s currently under discussion.'\n"
+        "- 'This has been forwarded to the concerned team for further evaluation.'\n"
+        "- 'Let me verify the details and get back to you.'\n"
+        "- 'I appreciate the update; I’ll keep this in mind.'\n"
+        "- 'Thanks for sharing — awaiting internal feedback.'\n"
+        "- 'We’ll get back to you once we have more clarity.'\n"
+        "- 'I acknowledge receipt of your message and will respond as needed.'\n"
+        "- 'We’re currently assessing feasibility; we’ll share a decision soon.'\n"
+        "- 'Please allow us some time to explore this further.'\n"
+        "- 'Your message has been logged for review by the appropriate team.'\n"
+        "- 'We acknowledge receipt of your resignation letter and will begin processing accordingly.'\n"
+        "- 'Your notice period has been taken into account — further steps will follow.'\n"
+        "- 'The transition process will be coordinated with your reporting manager.'\n"
+        "- 'We'll communicate any additional details once the review is complete.'\n"
+        "- 'Further analysis is underway — updates will follow.'\n"
+        "- 'This is under consideration; we will notify you once finalized.'\n"
+        "- 'Thank you for notifying us — we’ll respond with the next steps.'\n"
+        "- 'We understand the request and will revert after alignment with relevant stakeholders.'\n"
+        "- 'This input has been noted — we are reviewing it internally.'"
+    ),
 
-            # Replace placeholder with sender name if provided
-            if sender_name:
-                full_email = response.replace("[Your Name]", sender_name)
-            else:
-                full_email = response
+    "negative": (
+        "Respond in a respectful, empathetic, and professionally declining tone. "
+        "Begin by acknowledging the sender's effort or intention. "
+        "Politely decline the request with a brief explanation. "
+        "Maintain respect, offer alternatives if available, and avoid harsh language. "
+        "Example language includes:\n"
+        "- 'Thank you for your message. Unfortunately, I won’t be able to proceed with this at the moment.'\n"
+        "- 'Regrettably, due to existing commitments, I cannot attend the meeting.'\n"
+        "- 'I appreciate your proposal, but we are unable to accommodate it at this time.'\n"
+        "- 'While your request is valid, we are currently focusing on other priorities.'\n"
+        "- 'I must respectfully decline due to internal policy restrictions.'\n"
+        "- 'Unfortunately, I won’t be able to assist with this task.'\n"
+        "- 'As much as I’d like to help, this request falls outside my responsibilities.'\n"
+        "- 'We’ve reviewed the matter, and a different course of action is recommended.'\n"
+        "- 'Due to scheduling constraints, I won’t be able to join.'\n"
+        "- 'While I understand the need, this cannot be approved under current guidelines.'\n"
+        "- 'I appreciate your understanding and hope we can explore alternatives soon.'\n"
+        "- 'We regret to accept your resignation at this time, but understand and respect your decision.'\n"
+        "- 'Unfortunately, the current timeline doesn’t allow for the requested change.'\n"
+        "- 'We’ve explored the request, but it’s not feasible within our current scope.'\n"
+        "- 'We’re unable to make exceptions at this stage — thank you for understanding.'\n"
+        "- 'Despite your commitment, the current situation doesn’t allow us to proceed as requested.'\n"
+        "- 'We won’t be able to proceed further on this initiative under the current circumstances.'"
+    )
+}
 
-            # Background box for output
-            background_image_url = "https://i.pinimg.com/236x/f7/ab/d1/f7abd14eece4d7c94bc8cdaa3c47bf4e.jpg"
+# ────────── RIGHT: Output ──────────
+with right:
+    if submitted:
+        if not original_email.strip():
+            st.error("Please paste the email content before generating a reply.")
+            st.stop()
 
-            styled_html = f"""
-            <div style="
-                padding: 20px;
-                border-radius: 12px;
-                border: 1px solid #ccc;
-                background-image: url('{background_image_url}');
-                background-size: cover;
-                background-repeat: no-repeat;
-                background-position: center;
-                color: black;
-                font-size: 16px;
-                line-height: 1.6;
-                white-space: pre-wrap;
-                box-shadow: 2px 2px 8px rgba(0,0,0,0.1);
-            ">
-                {full_email.strip().replace('\n', '<br>')}
-            </div>
-            """
-            st.markdown("---")
-            st.markdown("✅ **Final Email:**", unsafe_allow_html=True)
-            st.markdown(styled_html, unsafe_allow_html=True)
+        keywords = format_keywords(keywords_raw)
 
-            # Send email if opted in
-            if send_email:
-                try:
-                    # Prepare the email
-                    msg = MIMEMultipart()
-                    msg['From'] = sender_email
-                    msg['To'] = recipient_email
-                    msg['Subject'] = f"Email from {sender_name if sender_name else sender_email} via Gen AI Assistant"
+        system_prompt = (
+            "You are an expert email copywriter. "
+            "Write clear, concise, and polite replies in fluent English."
+        )
 
-                    # Use plain text part for sending
-                    body = full_email.replace("<br>", "\n")
-                    msg.attach(MIMEText(body, 'plain'))
+        prompt = (
+            f"{system_prompt}\n\n"
+            f"{tone_instruction[tone]}\n"
+            f"Reply to the email below using a {tone} tone.\n"
+            f"- Keywords to include: {keywords}\n"
+            f"- Target length: about {word_limit} words\n"
+            "Structure: greeting, response body, closing.\n\n"
+            f"--- ORIGINAL EMAIL START ---\n{original_email.strip()}\n--- ORIGINAL EMAIL END ---"
+        )
 
-                    # SMTP sending - example uses Gmail
-                    smtp_server = 'smtp.gmail.com'
-                    smtp_port = 587
+        with st.spinner("Crafting your reply..."):
+            try:
+                email_body = llm.invoke(prompt).strip()
 
-                    server = smtplib.SMTP(smtp_server, smtp_port)
-                    server.starttls()
-                    server.login(sender_email, sender_password)
-                    server.send_message(msg)
-                    server.quit()
+                if not email_body:
+                    st.warning("No content generated. Try adjusting your input.")
+                else:
+                    st.markdown("**Generated Reply:**")
+                    st.markdown(
+                        f"""
+                        <div style='
+                            border: 1px solid #ccc;
+                            border-radius: 10px;
+                            padding: 15px;
+                            background-color: #f9f9f9;
+                            white-space: pre-wrap;
+                            font-family: "Segoe UI", sans-serif;
+                            font-size: 15px;
+                            line-height: 1.6;
+                            color: #333;
+                        '>{email_body}</div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                    st.download_button(" Download Reply", email_body, file_name="reply_email.txt")
 
-                    st.success(f"📨 Email sent successfully to {recipient_email}!")
-                except Exception as e:
-                    st.error(f"❌ Failed to send email: {e}")
+            except Exception as e:
+                st.error(f"LLM generation error: {e}")
+    else:
+        st.info("Paste your email on the left and click **Generate Reply**.")
